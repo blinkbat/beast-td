@@ -164,6 +164,13 @@ interface ImpactFx {
   startOpacity: number
 }
 
+interface ImpactLight {
+  light: THREE.PointLight
+  age: number
+  maxAge: number
+  peakIntensity: number
+}
+
 interface Arrow {
   group: THREE.Group
   position: THREE.Vector3
@@ -202,9 +209,20 @@ export function createWorld(opts: WorldOpts): World {
   )
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -0.5
+  ground.receiveShadow = true
   scene.add(ground)
   sceneObjects.push(ground)
   disposables.push(ground.geometry, ground.material as THREE.Material)
+
+  function enableShadowsOnGroup(root: THREE.Object3D) {
+    root.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return
+      const mat = obj.material
+      if (!Array.isArray(mat) && mat instanceof THREE.Material && mat.transparent) return
+      obj.castShadow = true
+      obj.receiveShadow = true
+    })
+  }
 
   const grid = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x2c3138, 0x2c3138)
   grid.position.y = -0.49
@@ -214,11 +232,25 @@ export function createWorld(opts: WorldOpts): World {
   sceneObjects.push(grid)
   disposables.push(grid.geometry, grid.material as THREE.Material)
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.45))
-  const sun = new THREE.DirectionalLight(0xffffff, 1.1)
-  sun.position.set(5, 12, 6)
+  scene.add(new THREE.AmbientLight(0xb8c8e8, 0.4))
+  const sun = new THREE.DirectionalLight(0xfff0d0, 1.4)
+  sun.position.set(10, 16, 8)
+  sun.target.position.set(0, 0, 0)
+  sun.castShadow = true
+  sun.shadow.mapSize.width = 2048
+  sun.shadow.mapSize.height = 2048
+  sun.shadow.camera.near = 0.5
+  sun.shadow.camera.far = 60
+  sun.shadow.camera.left = -22
+  sun.shadow.camera.right = 22
+  sun.shadow.camera.top = 22
+  sun.shadow.camera.bottom = -22
+  sun.shadow.bias = -0.0004
+  sun.shadow.normalBias = 0.02
   scene.add(sun)
+  scene.add(sun.target)
   sceneObjects.push(sun)
+  sceneObjects.push(sun.target)
 
   const pathPoints = [
     new THREE.Vector3(-12, 0, -3),
@@ -341,6 +373,7 @@ export function createWorld(opts: WorldOpts): World {
     const heart = new THREE.Mesh(heartGeom, heartLiveMat)
     heart.visible = false
     group.add(heart)
+    enableShadowsOnGroup(group)
     beastGroup.add(group)
     segments.push({
       group,
@@ -469,6 +502,7 @@ export function createWorld(opts: WorldOpts): World {
   const catapults: Catapult[] = []
   const bombs: Bomb[] = []
   const impactFxs: ImpactFx[] = []
+  const impactLights: ImpactLight[] = []
   const hirelings: Hireling[] = []
   let pendingCatapult: Catapult | null = null
 
@@ -478,7 +512,16 @@ export function createWorld(opts: WorldOpts): World {
     metalness: 0.7,
     roughness: 0.3,
   })
-  disposables.push(daggerGeom, daggerMat)
+  const homeMarkerGeom = new THREE.PlaneGeometry(0.8, 0.8)
+  homeMarkerGeom.rotateX(-Math.PI / 2)
+  const homeMarkerMat = new THREE.MeshBasicMaterial({
+    color: 0x803838,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  disposables.push(daggerGeom, daggerMat, homeMarkerGeom, homeMarkerMat)
 
   function cellOf(x: number, z: number) {
     const i = Math.floor(x + HALF_GRID)
@@ -523,6 +566,7 @@ export function createWorld(opts: WorldOpts): World {
     bow.position.set(0, MUZZLE_LOCAL_Y, MUZZLE_LOCAL_Z)
     archer.add(bow)
 
+    enableShadowsOnGroup(tower)
     scene.add(tower)
     sceneObjects.push(tower)
 
@@ -560,6 +604,7 @@ export function createWorld(opts: WorldOpts): World {
     bucket.position.set(0, 0.06, 0.72)
     swing.add(bucket)
 
+    enableShadowsOnGroup(group)
     scene.add(group)
     sceneObjects.push(group)
 
@@ -605,7 +650,13 @@ export function createWorld(opts: WorldOpts): World {
     rightDagger.position.set(0.18, 0.22, DAGGER_REST_Z)
     body.add(rightDagger)
 
+    enableShadowsOnGroup(group)
     scene.add(group)
+
+    const marker = new THREE.Mesh(homeMarkerGeom, homeMarkerMat)
+    marker.position.set(cx, GROUND_Y + 0.008, cz)
+    scene.add(marker)
+    sceneObjects.push(marker)
 
     hirelings.push({
       home,
@@ -930,6 +981,7 @@ export function createWorld(opts: WorldOpts): World {
     const startPos = bucketWorldPos(cat, new THREE.Vector3())
     const mesh = new THREE.Mesh(bombGeom, bombMat)
     mesh.position.copy(startPos)
+    mesh.castShadow = true
     scene.add(mesh)
     bombs.push({
       mesh,
@@ -970,6 +1022,28 @@ export function createWorld(opts: WorldOpts): World {
     })
   }
 
+  function spawnImpactLight(position: THREE.Vector3) {
+    const peakIntensity = 6
+    const light = new THREE.PointLight(0xffb060, peakIntensity, 5, 2)
+    light.position.set(position.x, GROUND_Y + 0.6, position.z)
+    scene.add(light)
+    impactLights.push({ light, age: 0, maxAge: 0.45, peakIntensity })
+  }
+
+  function updateImpactLights(dt: number) {
+    for (let i = impactLights.length - 1; i >= 0; i--) {
+      const il = impactLights[i]
+      il.age += dt
+      if (il.age >= il.maxAge) {
+        scene.remove(il.light)
+        impactLights.splice(i, 1)
+        continue
+      }
+      const t = il.age / il.maxAge
+      il.light.intensity = il.peakIntensity * (1 - t)
+    }
+  }
+
   function updateImpactFx(dt: number) {
     for (let i = impactFxs.length - 1; i >= 0; i--) {
       const fx = impactFxs[i]
@@ -988,6 +1062,7 @@ export function createWorld(opts: WorldOpts): World {
 
   function bombImpact(target: THREE.Vector3) {
     spawnImpactFx(target)
+    spawnImpactLight(target)
     const probe = new THREE.Vector3()
     const aoeSq = CATAPULT_AOE_RADIUS * CATAPULT_AOE_RADIUS
     for (const seg of segments) {
@@ -1537,6 +1612,7 @@ export function createWorld(opts: WorldOpts): World {
     updateArrows(dt)
     updateBombs(dt)
     updateImpactFx(dt)
+    updateImpactLights(dt)
     updateDebris(dt)
   }
 
@@ -1555,6 +1631,8 @@ export function createWorld(opts: WorldOpts): World {
       ;(fx.mesh.material as THREE.Material).dispose()
     }
     impactFxs.length = 0
+    for (const il of impactLights) scene.remove(il.light)
+    impactLights.length = 0
     for (const h of hirelings) scene.remove(h.group)
     hirelings.length = 0
     for (const d of debris) scene.remove(d.mesh)

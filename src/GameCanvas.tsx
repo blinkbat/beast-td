@@ -42,6 +42,8 @@ export default function GameCanvas() {
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(mount.clientWidth, mount.clientHeight)
+    renderer.shadowMap.enabled = true
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
     mount.appendChild(renderer.domElement)
 
     let world = createWorld({ scene, camera, canvas: renderer.domElement })
