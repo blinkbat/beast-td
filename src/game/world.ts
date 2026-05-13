@@ -46,7 +46,7 @@ const IMPACT_FLASH_END = 1.6
 const IMPACT_WAVE_DURATION = 0.55
 const IMPACT_WAVE_END_SCALE = CATAPULT_AOE_RADIUS / 0.5
 const HIRELING_SPEED = 2.2
-const HIRELING_LEASH = 8
+const HIRELING_LEASH = 5
 const HIRELING_AGGRO = 10
 const HIRELING_ATTACK_RANGE = 1.0
 const HIRELING_ATTACK_RANGE_HOLD = 1.5
@@ -145,6 +145,7 @@ interface Catapult {
   cooldown: number
   swingT: number
   hasFired: boolean
+  pendingFirstTarget: boolean
 }
 
 interface Bomb {
@@ -205,19 +206,19 @@ export function createWorld(opts: WorldOpts): World {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE),
-    new THREE.MeshStandardMaterial({ color: 0x1a1d22 }),
+    new THREE.MeshStandardMaterial({ color: 0x1a1d22, roughness: 0.4, metalness: 0.35 }),
   )
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -0.5
   ground.receiveShadow = true
   scene.add(ground)
   sceneObjects.push(ground)
-  disposables.push(ground.geometry, ground.material as THREE.Material)
+  disposables.push(ground.geometry, ground.material)
 
   function enableShadowsOnGroup(root: THREE.Object3D) {
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return
-      const mat = obj.material
+      const mat: unknown = obj.material
       if (!Array.isArray(mat) && mat instanceof THREE.Material && mat.transparent) return
       obj.castShadow = true
       obj.receiveShadow = true
@@ -226,11 +227,11 @@ export function createWorld(opts: WorldOpts): World {
 
   const grid = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x2c3138, 0x2c3138)
   grid.position.y = -0.49
-  ;(grid.material as THREE.Material).transparent = true
-  ;(grid.material as THREE.Material).opacity = 0.6
+  grid.material.transparent = true
+  grid.material.opacity = 0.6
   scene.add(grid)
   sceneObjects.push(grid)
-  disposables.push(grid.geometry, grid.material as THREE.Material)
+  disposables.push(grid.geometry, grid.material)
 
   scene.add(new THREE.AmbientLight(0xb8c8e8, 0.4))
   const sun = new THREE.DirectionalLight(0xfff0d0, 1.4)
@@ -290,6 +291,30 @@ export function createWorld(opts: WorldOpts): World {
     }
   }
 
+  const cellNearestPath = new Float32Array(GRID_SIZE * GRID_SIZE * 2)
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE; j++) {
+      const cx = i - HALF_GRID + 0.5
+      const cz = j - HALF_GRID + 0.5
+      let bestX = samples[0].x
+      let bestZ = samples[0].z
+      let bestDistSq = Infinity
+      for (const p of samples) {
+        const dx = cx - p.x
+        const dz = cz - p.z
+        const dSq = dx * dx + dz * dz
+        if (dSq < bestDistSq) {
+          bestDistSq = dSq
+          bestX = p.x
+          bestZ = p.z
+        }
+      }
+      const idx = (i * GRID_SIZE + j) * 2
+      cellNearestPath[idx] = bestX
+      cellNearestPath[idx + 1] = bestZ
+    }
+  }
+
   const overlayGeom = new THREE.PlaneGeometry(0.96, 0.96)
   overlayGeom.rotateX(-Math.PI / 2)
   const blockedMat = new THREE.MeshBasicMaterial({
@@ -331,15 +356,24 @@ export function createWorld(opts: WorldOpts): World {
     medium: new THREE.BoxGeometry(...CHUNK_DIMS.medium),
     large: new THREE.BoxGeometry(...CHUNK_DIMS.large),
   }
-  const chunkMat = new THREE.MeshStandardMaterial({ color: 0xb84a5a, roughness: 0.7 })
+  const chunkMat = new THREE.MeshStandardMaterial({
+    color: 0xb84a5a,
+    roughness: 0.3,
+    metalness: 0.35,
+  })
   const heartGeom = new THREE.IcosahedronGeometry(0.4, 0)
   const heartLiveMat = new THREE.MeshStandardMaterial({
     color: 0xff3050,
     emissive: 0x801020,
     emissiveIntensity: 0.6,
-    roughness: 0.4,
+    roughness: 0.2,
+    metalness: 0.4,
   })
-  const heartDeadMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.9 })
+  const heartDeadMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2a2a,
+    roughness: 0.4,
+    metalness: 0.5,
+  })
   disposables.push(
     chunkGeomBySize.small,
     chunkGeomBySize.medium,
@@ -390,21 +424,49 @@ export function createWorld(opts: WorldOpts): World {
   let beastFinished = false
 
   const towerBaseGeom = new THREE.BoxGeometry(0.7, 0.4, 0.7)
-  const towerBaseMat = new THREE.MeshStandardMaterial({ color: 0x4a4248, roughness: 0.9 })
+  const towerBaseMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4248,
+    roughness: 0.35,
+    metalness: 0.5,
+  })
   const towerTrunkGeom = new THREE.BoxGeometry(0.45, 0.7, 0.45)
-  const towerTrunkMat = new THREE.MeshStandardMaterial({ color: 0x6a6058, roughness: 0.85 })
+  const towerTrunkMat = new THREE.MeshStandardMaterial({
+    color: 0x6a6058,
+    roughness: 0.35,
+    metalness: 0.5,
+  })
   const archerBodyGeom = new THREE.CylinderGeometry(0.13, 0.16, 0.4, 8)
   const archerBodyMats: Record<UnitType, THREE.MeshStandardMaterial> = {
-    archer: new THREE.MeshStandardMaterial({ color: 0x3a5040, roughness: 0.7 }),
-    catapult: new THREE.MeshStandardMaterial({ color: 0x6a4838, roughness: 0.7 }),
-    hireling: new THREE.MeshStandardMaterial({ color: 0x803838, roughness: 0.7 }),
+    archer: new THREE.MeshStandardMaterial({
+      color: 0x3a5040,
+      roughness: 0.35,
+      metalness: 0.4,
+    }),
+    catapult: new THREE.MeshStandardMaterial({
+      color: 0x6a4838,
+      roughness: 0.35,
+      metalness: 0.4,
+    }),
+    hireling: new THREE.MeshStandardMaterial({
+      color: 0x803838,
+      roughness: 0.35,
+      metalness: 0.4,
+    }),
   }
   const archerHeadGeom = new THREE.SphereGeometry(0.11, 10, 8)
-  const archerHeadMat = new THREE.MeshStandardMaterial({ color: 0xc0a080, roughness: 0.6 })
+  const archerHeadMat = new THREE.MeshStandardMaterial({
+    color: 0xc0a080,
+    roughness: 0.3,
+    metalness: 0.15,
+  })
   const bowGeom = new THREE.TorusGeometry(0.14, 0.015, 4, 14, Math.PI)
   bowGeom.rotateX(Math.PI / 2)
   bowGeom.rotateZ(Math.PI / 2)
-  const bowMat = new THREE.MeshStandardMaterial({ color: 0x6a4830, roughness: 0.8 })
+  const bowMat = new THREE.MeshStandardMaterial({
+    color: 0x6a4830,
+    roughness: 0.3,
+    metalness: 0.45,
+  })
   disposables.push(
     towerBaseGeom,
     towerBaseMat,
@@ -424,12 +486,16 @@ export function createWorld(opts: WorldOpts): World {
   const catapultPillarGeom = new THREE.BoxGeometry(0.4, 0.8, 0.4)
   const catapultArmGeom = new THREE.BoxGeometry(0.18, 0.12, 0.9)
   const catapultBucketGeom = new THREE.BoxGeometry(0.22, 0.18, 0.22)
-  const catapultMat = new THREE.MeshStandardMaterial({ color: 0x6a4830, roughness: 0.9 })
+  const catapultMat = new THREE.MeshStandardMaterial({
+    color: 0x6a4830,
+    roughness: 0.3,
+    metalness: 0.45,
+  })
   const bombGeom = new THREE.SphereGeometry(0.18, 10, 8)
   const bombMat = new THREE.MeshStandardMaterial({
     color: 0x1a1a1a,
-    roughness: 0.7,
-    metalness: 0.4,
+    roughness: 0.15,
+    metalness: 0.85,
   })
   const impactFlashGeom = new THREE.SphereGeometry(0.5, 14, 10)
   const impactWaveGeom = new THREE.RingGeometry(0.42, 0.5, 32)
@@ -509,8 +575,8 @@ export function createWorld(opts: WorldOpts): World {
   const daggerGeom = new THREE.BoxGeometry(0.03, 0.03, 0.2)
   const daggerMat = new THREE.MeshStandardMaterial({
     color: 0xc0c0c0,
-    metalness: 0.7,
-    roughness: 0.3,
+    roughness: 0.15,
+    metalness: 0.9,
   })
   const homeMarkerGeom = new THREE.PlaneGeometry(0.8, 0.8)
   homeMarkerGeom.rotateX(-Math.PI / 2)
@@ -615,9 +681,10 @@ export function createWorld(opts: WorldOpts): World {
       swing,
       bucket,
       targetPos: origin.clone(),
-      cooldown: Number.POSITIVE_INFINITY,
+      cooldown: 0,
       swingT: -1,
       hasFired: false,
+      pendingFirstTarget: true,
     }
     catapults.push(cat)
     occupied.add(key)
@@ -733,20 +800,15 @@ export function createWorld(opts: WorldOpts): World {
   }
 
   function pushHirelingFromPath(h: Hireling) {
-    let bestX = 0
-    let bestZ = 0
-    let bestDistSq = Infinity
-    for (const p of samples) {
-      const dx = h.position.x - p.x
-      const dz = h.position.z - p.z
-      const dSq = dx * dx + dz * dz
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq
-        bestX = p.x
-        bestZ = p.z
-      }
-    }
-    if (bestDistSq < HIRELING_PATH_BUFFER * HIRELING_PATH_BUFFER) {
+    const i = Math.floor(h.position.x + HALF_GRID)
+    const j = Math.floor(h.position.z + HALF_GRID)
+    if (i < 0 || i >= GRID_SIZE || j < 0 || j >= GRID_SIZE) return
+    const idx = (i * GRID_SIZE + j) * 2
+    const bestX = cellNearestPath[idx]
+    const bestZ = cellNearestPath[idx + 1]
+    const dx = h.position.x - bestX
+    const dz = h.position.z - bestZ
+    if (dx * dx + dz * dz < HIRELING_PATH_BUFFER * HIRELING_PATH_BUFFER) {
       pushAwayPoint(h.position, bestX, bestZ, HIRELING_PATH_BUFFER)
     }
   }
@@ -1121,9 +1183,21 @@ export function createWorld(opts: WorldOpts): World {
   tipGeom.translate(0, 0.3, 0)
   const fletchGeom = new THREE.ConeGeometry(0.08, 0.08, 4)
   fletchGeom.translate(0, 0.04, 0)
-  const shaftMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.8 })
-  const tipMat = new THREE.MeshStandardMaterial({ color: 0xd0c090, metalness: 0.6, roughness: 0.3 })
-  const fletchMat = new THREE.MeshStandardMaterial({ color: 0xffd960, roughness: 0.6 })
+  const shaftMat = new THREE.MeshStandardMaterial({
+    color: 0x8a6a3a,
+    roughness: 0.3,
+    metalness: 0.45,
+  })
+  const tipMat = new THREE.MeshStandardMaterial({
+    color: 0xd0c090,
+    roughness: 0.15,
+    metalness: 0.85,
+  })
+  const fletchMat = new THREE.MeshStandardMaterial({
+    color: 0xffd960,
+    roughness: 0.25,
+    metalness: 0.4,
+  })
   disposables.push(shaftGeom, tipGeom, fletchGeom, shaftMat, tipMat, fletchMat)
 
   const arrows: Arrow[] = []
@@ -1423,21 +1497,20 @@ export function createWorld(opts: WorldOpts): World {
   const raycaster = new THREE.Raycaster()
   const buildPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.5)
   const ndc = new THREE.Vector2()
-  const hitVec = new THREE.Vector3()
+  const cellHit = new THREE.Vector3()
+  const cursorWorld = new THREE.Vector3()
 
   function pickCellFromEvent(ev: PointerEvent) {
     const rect = canvas.getBoundingClientRect()
     ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
     ndc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
     raycaster.setFromCamera(ndc, camera)
-    if (!raycaster.ray.intersectPlane(buildPlane, hitVec)) return null
-    const c = cellOf(hitVec.x, hitVec.z)
+    if (!raycaster.ray.intersectPlane(buildPlane, cellHit)) return null
+    const c = cellOf(cellHit.x, cellHit.z)
     if (!c.inBounds) return null
     const buildable = !blocked.has(c.key) && !occupied.has(c.key)
     return { ...c, buildable }
   }
-
-  const cursorWorld = new THREE.Vector3()
 
   function isTargetInRange(cat: Catapult, x: number, z: number): boolean {
     const dx = x - cat.origin.x
@@ -1454,14 +1527,13 @@ export function createWorld(opts: WorldOpts): World {
     ndc.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
     ndc.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
     raycaster.setFromCamera(ndc, camera)
-    if (!raycaster.ray.intersectPlane(buildPlane, hitVec)) return false
-    cursorWorld.copy(hitVec)
-    return true
+    return raycaster.ray.intersectPlane(buildPlane, cursorWorld) !== null
   }
 
   function confirmCatapultTarget() {
     if (!pendingCatapult) return
-    if (pendingCatapult.cooldown === Number.POSITIVE_INFINITY) {
+    if (pendingCatapult.pendingFirstTarget) {
+      pendingCatapult.pendingFirstTarget = false
       pendingCatapult.cooldown = CATAPULT_COOLDOWN * 0.4
     }
     pendingCatapult = null
@@ -1502,7 +1574,7 @@ export function createWorld(opts: WorldOpts): World {
       aoeRing.position.x = cursorWorld.x
       aoeRing.position.z = cursorWorld.z
       const valid = isTargetInRange(pendingCatapult, cursorWorld.x, cursorWorld.z)
-      ;(aoeRing.material as THREE.MeshBasicMaterial).color.setHex(valid ? 0xffa040 : 0xff4040)
+      aoeRing.material.color.setHex(valid ? 0xffa040 : 0xff4040)
       if (valid) {
         pendingCatapult.targetPos.set(cursorWorld.x, GROUND_Y, cursorWorld.z)
         aimCatapult(pendingCatapult)
@@ -1574,7 +1646,7 @@ export function createWorld(opts: WorldOpts): World {
   canvas.addEventListener('pointermove', onPointerMove)
   canvas.addEventListener('pointerdown', onPointerDown)
   canvas.addEventListener('pointerleave', onPointerLeave)
-  window.addEventListener('contextmenu', onContextMenu)
+  canvas.addEventListener('contextmenu', onContextMenu)
 
   function tick(dt: number) {
     if (!beastFinished) {
@@ -1620,7 +1692,7 @@ export function createWorld(opts: WorldOpts): World {
     canvas.removeEventListener('pointermove', onPointerMove)
     canvas.removeEventListener('pointerdown', onPointerDown)
     canvas.removeEventListener('pointerleave', onPointerLeave)
-    window.removeEventListener('contextmenu', onContextMenu)
+    canvas.removeEventListener('contextmenu', onContextMenu)
     unsubscribeStore()
     for (const a of arrows) scene.remove(a.group)
     arrows.length = 0

@@ -22,7 +22,7 @@ type Listener = (state: Readonly<GameState>) => void
 const listeners = new Set<Listener>()
 
 function notify() {
-  for (const l of listeners) l(state)
+  for (const l of [...listeners]) l(state)
 }
 
 export const gameStore = {

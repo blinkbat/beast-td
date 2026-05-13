@@ -1,73 +1,39 @@
-# React + TypeScript + Vite
+# Beast TD
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A small 3D tower-defense prototype: place archers, catapults, and hirelings to chew through a multi-segmented beast that crawls along a path.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- React 19 (HUD only)
+- TypeScript
+- Vite
+- three.js (scene + game loop)
 
-## React Compiler
+## Architecture
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The game loop is raw three.js in [src/game/world.ts](src/game/world.ts), driven every frame by `requestAnimationFrame` in [src/GameCanvas.tsx](src/GameCanvas.tsx). React is used only for the HUD; HUD state lives in a tiny pub/sub store in [src/game/gameStore.ts](src/game/gameStore.ts) so React re-renders happen only when gold or selection changes — never inside the tick.
 
-## Expanding the ESLint configuration
+## Run
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Build / preview / lint
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+npm run build
+npm run preview
+npm run lint
+```
+
+## Controls
+
+- Arrow keys — pan camera
+- Mouse wheel — zoom (street view → bird's-eye)
+- `1` / `2` / `3` — select archer / catapult / hireling
+- `Esc` — cancel selection
+- Left-click — place the selected unit on a buildable cell (catapult: then click again to confirm aim)
+- Right-click — cancel pending placement / catapult retarget
+- Left-click an existing catapult — retarget it
