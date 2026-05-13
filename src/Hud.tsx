@@ -57,8 +57,10 @@ export default function Hud() {
 
   return (
     <div className="hud">
-      <div className="gold">{gold}g</div>
-      <div className="unit-bar">
+      <div className="gold" aria-live="polite" aria-label={`${gold} gold`}>
+        {gold}g
+      </div>
+      <div className="unit-bar" role="toolbar" aria-label="Unit selection">
         {UNITS.map((u) => {
           const cost = UNIT_COST[u.type]
           const canAfford = gold >= cost
@@ -73,15 +75,19 @@ export default function Hud() {
           return (
             <button
               key={u.type}
+              type="button"
               className={classes}
               onClick={() => gameStore.setSelectedUnit(isSelected ? null : u.type)}
               title={u.description}
+              aria-pressed={isSelected}
+              aria-keyshortcuts={u.hotkey}
+              aria-label={`${u.name} (${u.role}), cost ${cost} gold, hotkey ${u.hotkey}`}
             >
               <div className="unit-name">
                 {u.name} <span className="unit-role">[{u.role}]</span>
               </div>
               <div className="unit-cost">
-                {cost}g <span className="unit-hotkey">{u.hotkey}</span>
+                {cost}g <span className="unit-hotkey" aria-hidden="true">{u.hotkey}</span>
               </div>
             </button>
           )

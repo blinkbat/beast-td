@@ -25,7 +25,7 @@ export default function GameCanvas() {
       55,
       mount.clientWidth / mount.clientHeight,
       0.1,
-      1000,
+      100,
     )
     const camTarget = new THREE.Vector3(0, 0, 0)
     const camOffset = new THREE.Vector3()
@@ -39,11 +39,17 @@ export default function GameCanvas() {
     }
     applyCamera()
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+    })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setSize(mount.clientWidth, mount.clientHeight)
     renderer.shadowMap.enabled = true
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.shadowMap.type = THREE.PCFShadowMap
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.0
     mount.appendChild(renderer.domElement)
 
     let world = createWorld({ scene, camera, canvas: renderer.domElement })

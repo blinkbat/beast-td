@@ -157,7 +157,7 @@ interface Bomb {
 }
 
 interface ImpactFx {
-  mesh: THREE.Mesh
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
   age: number
   maxAge: number
   startScale: number
@@ -203,6 +203,7 @@ export function createWorld(opts: WorldOpts): World {
   const { scene, camera, canvas } = opts
   const disposables: { dispose(): void }[] = []
   const sceneObjects: THREE.Object3D[] = []
+  const scratch = new THREE.Vector3()
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE),
@@ -238,8 +239,8 @@ export function createWorld(opts: WorldOpts): World {
   sun.position.set(10, 16, 8)
   sun.target.position.set(0, 0, 0)
   sun.castShadow = true
-  sun.shadow.mapSize.width = 2048
-  sun.shadow.mapSize.height = 2048
+  sun.shadow.mapSize.width = 1024
+  sun.shadow.mapSize.height = 1024
   sun.shadow.camera.near = 0.5
   sun.shadow.camera.far = 60
   sun.shadow.camera.left = -22
@@ -420,8 +421,14 @@ export function createWorld(opts: WorldOpts): World {
     })
   }
 
-  let headDistance = (SEGMENT_COUNT - 1) * SEGMENT_SPACING
+  const TAIL_OFFSET = (SEGMENT_COUNT - 1) * SEGMENT_SPACING
+  let headDistance = TAIL_OFFSET
   let beastFinished = false
+
+  function anyHeartAlive(): boolean {
+    for (const s of segments) if (s.heartAlive) return true
+    return false
+  }
 
   const towerBaseGeom = new THREE.BoxGeometry(0.7, 0.4, 0.7)
   const towerBaseMat = new THREE.MeshStandardMaterial({
@@ -750,14 +757,13 @@ export function createWorld(opts: WorldOpts): World {
     let bestSeg: Segment | null = null
     let bestChunk: Chunk | null = null
     let bestDistSq = range * range
-    const probe = new THREE.Vector3()
     for (const seg of segments) {
       if (!seg.group.visible) continue
       for (const c of seg.chunks) {
         if (!c.alive) continue
-        chunkWorldPos(seg, c, probe)
-        const dx = probe.x - from.x
-        const dz = probe.z - from.z
+        chunkWorldPos(seg, c, scratch)
+        const dx = scratch.x - from.x
+        const dz = scratch.z - from.z
         const dSq = dx * dx + dz * dz
         if (dSq < bestDistSq) {
           bestDistSq = dSq
@@ -866,7 +872,6 @@ export function createWorld(opts: WorldOpts): World {
   }
 
   function tickHirelings(dt: number) {
-    const tmpPos = new THREE.Vector3()
     for (const h of hirelings) {
       let moving = false
       h.attackCooldown -= dt
@@ -875,9 +880,9 @@ export function createWorld(opts: WorldOpts): World {
         h.commitTimer -= dt
         const target = h.targetChunk
         if (target && target.alive) {
-          chunkWorldPos(h.targetSeg!, target, tmpPos)
-          const dx = tmpPos.x - h.position.x
-          const dz = tmpPos.z - h.position.z
+          chunkWorldPos(h.targetSeg!, target, scratch)
+          const dx = scratch.x - h.position.x
+          const dz = scratch.z - h.position.z
           h.group.rotation.y = Math.atan2(dx, dz)
           const distSq = dx * dx + dz * dz
           if (
@@ -935,9 +940,9 @@ export function createWorld(opts: WorldOpts): World {
             h.targetSeg = null
             h.targetChunk = null
           } else {
-            chunkWorldPos(h.targetSeg, h.targetChunk, tmpPos)
-            const dx = tmpPos.x - h.position.x
-            const dz = tmpPos.z - h.position.z
+            chunkWorldPos(h.targetSeg, h.targetChunk, scratch)
+            const dx = scratch.x - h.position.x
+            const dz = scratch.z - h.position.z
             const distSq = dx * dx + dz * dz
             if (distSq < HIRELING_ATTACK_RANGE * HIRELING_ATTACK_RANGE) {
               h.state = 'attacking'
@@ -945,7 +950,7 @@ export function createWorld(opts: WorldOpts): World {
               h.attackCooldown = 0
               h.group.rotation.y = Math.atan2(dx, dz)
             } else {
-              moveHirelingToward(h, tmpPos.x, tmpPos.z, dt)
+              moveHirelingToward(h, scratch.x, scratch.z, dt)
               moving = true
             }
           }
@@ -1112,28 +1117,29 @@ export function createWorld(opts: WorldOpts): World {
       fx.age += dt
       if (fx.age >= fx.maxAge) {
         scene.remove(fx.mesh)
-        ;(fx.mesh.material as THREE.Material).dispose()
+        fx.mesh.material.dispose()
         impactFxs.splice(i, 1)
         continue
       }
       const t = fx.age / fx.maxAge
       fx.mesh.scale.setScalar(fx.startScale + (fx.endScale - fx.startScale) * t)
-      ;(fx.mesh.material as THREE.MeshBasicMaterial).opacity = fx.startOpacity * (1 - t)
+      fx.mesh.material.opacity = fx.startOpacity * (1 - t)
     }
   }
 
   function bombImpact(target: THREE.Vector3) {
     spawnImpactFx(target)
     spawnImpactLight(target)
-    const probe = new THREE.Vector3()
     const aoeSq = CATAPULT_AOE_RADIUS * CATAPULT_AOE_RADIUS
+    const broadSq = (CATAPULT_AOE_RADIUS + 2) ** 2
     for (const seg of segments) {
       if (!seg.group.visible) continue
       const segDx = seg.position.x - target.x
       const segDz = seg.position.z - target.z
-      if (segDx * segDx + segDz * segDz > (CATAPULT_AOE_RADIUS + 2) ** 2) continue
+      const segDSq = segDx * segDx + segDz * segDz
+      if (segDSq > broadSq) continue
       if (!isFleshAlive(seg) && seg.heartAlive) {
-        if (segDx * segDx + segDz * segDz < aoeSq) {
+        if (segDSq < aoeSq) {
           seg.heartHp -= CATAPULT_DAMAGE
           if (seg.heartHp <= 0) {
             seg.heartAlive = false
@@ -1143,9 +1149,9 @@ export function createWorld(opts: WorldOpts): World {
       }
       for (const c of seg.chunks) {
         if (!c.alive) continue
-        chunkWorldPos(seg, c, probe)
-        const dx = probe.x - target.x
-        const dz = probe.z - target.z
+        chunkWorldPos(seg, c, scratch)
+        const dx = scratch.x - target.x
+        const dz = scratch.z - target.z
         if (dx * dx + dz * dz < aoeSq) {
           c.hp -= CATAPULT_DAMAGE
           if (c.hp <= 0) {
@@ -1250,14 +1256,16 @@ export function createWorld(opts: WorldOpts): World {
     return out
   }
 
+  const GUN_RANGE_SQ = GUN_RANGE * GUN_RANGE
+
   function pickTarget(gun: Gun): AimTarget | null {
     let bestHeartSeg: Segment | null = null
-    let bestHeartDist = GUN_RANGE
+    let bestHeartDistSq = GUN_RANGE_SQ
     for (const seg of segments) {
       if (!seg.group.visible || isFleshAlive(seg) || !seg.heartAlive) continue
-      const dist = gun.origin.distanceTo(seg.position)
-      if (dist < bestHeartDist) {
-        bestHeartDist = dist
+      const dSq = gun.origin.distanceToSquared(seg.position)
+      if (dSq < bestHeartDistSq) {
+        bestHeartDistSq = dSq
         bestHeartSeg = seg
       }
     }
@@ -1266,16 +1274,15 @@ export function createWorld(opts: WorldOpts): World {
     }
     let bestSeg: Segment | null = null
     let bestChunk: Chunk | null = null
-    let bestChunkDist = GUN_RANGE
-    const probe = new THREE.Vector3()
+    let bestChunkDistSq = GUN_RANGE_SQ
     for (const seg of segments) {
       if (!seg.group.visible) continue
       for (const c of seg.chunks) {
         if (!c.alive) continue
-        chunkWorldPos(seg, c, probe)
-        const dist = gun.origin.distanceTo(probe)
-        if (dist < bestChunkDist) {
-          bestChunkDist = dist
+        chunkWorldPos(seg, c, scratch)
+        const dSq = gun.origin.distanceToSquared(scratch)
+        if (dSq < bestChunkDistSq) {
+          bestChunkDistSq = dSq
           bestSeg = seg
           bestChunk = c
         }
@@ -1444,22 +1451,27 @@ export function createWorld(opts: WorldOpts): World {
     }
   }
 
-  const collisionProbe = new THREE.Vector3()
+  const SEGMENT_BROAD_RADIUS_SQ = SEGMENT_BROAD_RADIUS * SEGMENT_BROAD_RADIUS
+  const HEART_HIT_RADIUS_SQ = HEART_HIT_RADIUS * HEART_HIT_RADIUS
+  const CHUNK_HIT_RADIUS_SQ: Record<ChunkSize, number> = {
+    small: CHUNK_HIT_RADIUS.small * CHUNK_HIT_RADIUS.small,
+    medium: CHUNK_HIT_RADIUS.medium * CHUNK_HIT_RADIUS.medium,
+    large: CHUNK_HIT_RADIUS.large * CHUNK_HIT_RADIUS.large,
+  }
   function checkArrowCollision(
     arrowPos: THREE.Vector3,
   ): { seg: Segment; chunk: Chunk | null; isHeart: boolean } | null {
     for (const seg of segments) {
       if (!seg.group.visible) continue
-      if (arrowPos.distanceTo(seg.position) > SEGMENT_BROAD_RADIUS) continue
-      if (!isFleshAlive(seg) && seg.heartAlive) {
-        if (arrowPos.distanceTo(seg.position) < HEART_HIT_RADIUS) {
-          return { seg, chunk: null, isHeart: true }
-        }
+      const segDSq = arrowPos.distanceToSquared(seg.position)
+      if (segDSq > SEGMENT_BROAD_RADIUS_SQ) continue
+      if (!isFleshAlive(seg) && seg.heartAlive && segDSq < HEART_HIT_RADIUS_SQ) {
+        return { seg, chunk: null, isHeart: true }
       }
       for (const c of seg.chunks) {
         if (!c.alive) continue
-        chunkWorldPos(seg, c, collisionProbe)
-        if (arrowPos.distanceTo(collisionProbe) < CHUNK_HIT_RADIUS[c.size]) {
+        chunkWorldPos(seg, c, scratch)
+        if (arrowPos.distanceToSquared(scratch) < CHUNK_HIT_RADIUS_SQ[c.size]) {
           return { seg, chunk: c, isHeart: false }
         }
       }
@@ -1650,10 +1662,10 @@ export function createWorld(opts: WorldOpts): World {
 
   function tick(dt: number) {
     if (!beastFinished) {
-      const anyHeartAlive = segments.some((s) => s.heartAlive)
-      if (anyHeartAlive) headDistance += BEAST_SPEED * dt
-      const lastSegmentArc = headDistance - (SEGMENT_COUNT - 1) * SEGMENT_SPACING
-      if (lastSegmentArc > pathLength || !anyHeartAlive) beastFinished = true
+      const alive = anyHeartAlive()
+      if (alive) headDistance += BEAST_SPEED * dt
+      const lastSegmentArc = headDistance - TAIL_OFFSET
+      if (lastSegmentArc > pathLength || !alive) beastFinished = true
       updateSegments()
     }
 
@@ -1700,7 +1712,7 @@ export function createWorld(opts: WorldOpts): World {
     bombs.length = 0
     for (const fx of impactFxs) {
       scene.remove(fx.mesh)
-      ;(fx.mesh.material as THREE.Material).dispose()
+      fx.mesh.material.dispose()
     }
     impactFxs.length = 0
     for (const il of impactLights) scene.remove(il.light)
