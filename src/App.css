@@ -1,0 +1,89 @@
+.game-canvas {
+  position: fixed;
+  inset: 0;
+}
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: var(--sans);
+}
+
+.hud .gold {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffd960;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 15px;
+  pointer-events: auto;
+  letter-spacing: 0.5px;
+}
+
+.hud .unit-bar {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.hud .unit-card {
+  background: rgba(20, 24, 30, 0.85);
+  color: #e0e4eb;
+  border: 2px solid #2c3138;
+  padding: 10px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  min-width: 150px;
+  transition: border-color 120ms, background 120ms;
+}
+
+.hud .unit-card:hover {
+  border-color: #4a5260;
+}
+
+.hud .unit-card.selected {
+  border-color: #ffd960;
+  background: rgba(50, 42, 18, 0.92);
+}
+
+.hud .unit-card.cant-afford {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.hud .unit-name {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.hud .unit-role {
+  font-weight: 400;
+  color: #8a90a0;
+  font-size: 11px;
+}
+
+.hud .unit-cost {
+  color: #ffd960;
+  font-size: 12px;
+}
+
+.hud .unit-hotkey {
+  display: inline-block;
+  color: #8a90a0;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border: 1px solid #4a5260;
+  border-radius: 3px;
+  font-size: 10px;
+}
